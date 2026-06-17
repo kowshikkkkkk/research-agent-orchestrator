@@ -5,6 +5,7 @@ import os
 from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
+import httpx
 
 load_dotenv()
 
@@ -38,11 +39,39 @@ llm = ChatGroq(
 # Each node is a function that takes state and returns updated state.
 # Right now these are stubs — we'll replace them with real agents in later phases.
 
+import httpx
+
 def web_research_node(state: ResearchState) -> ResearchState:
-    """Calls the Web Research Agent. Returns web search results."""
-    print(f"[Orchestrator] Calling Web Research Agent for: {state['query']}")
-    # Stub — will be replaced with real A2A call in Phase 2
-    return {"web_results": f"[WEB STUB] Results for: {state['query']}"}
+    """
+    Calls the Web Research Agent via A2A protocol.
+    This is a real HTTP call to an independent service — not a function call.
+    That's what makes it truly multi-agent.
+    """
+    print(f"[Orchestrator] Calling Web Research Agent via A2A for: {state['query']}")
+    
+    try:
+        # A2A Task object — standardized structure
+        task_payload = {
+            "task_id": f"web-{state['query'][:20].replace(' ', '-')}",
+            "input": {"query": state['query']},
+            "context": {}
+        }
+        
+        response = httpx.post(
+            "http://localhost:8001/tasks/send",
+            json=task_payload,
+            timeout=30.0
+        )
+        
+        result = response.json()
+        
+        if result["status"] == "completed":
+            return {"web_results": result["output"]["synthesis"]}
+        else:
+            return {"web_results": f"Web research failed: {result['output'].get('error', 'Unknown error')}"}
+            
+    except Exception as e:
+        return {"web_results": f"Web Research Agent unreachable: {str(e)}"}
 
 def rag_knowledge_node(state: ResearchState) -> ResearchState:
     """Calls the RAG Knowledge Agent. Returns relevant docs from vector store."""
