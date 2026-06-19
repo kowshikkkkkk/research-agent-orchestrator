@@ -34,13 +34,10 @@ async def call_mcp_tool(tool_name: str, arguments: dict) -> dict:
     server_path = Path(__file__).parent.parent.parent / "mcp_servers" / "web_search_mcp.py"
     
     server_params = StdioServerParameters(
-        command="python",
-        args=[str(server_path)],
-        env={
-            "TAVILY_API_KEY": os.getenv("TAVILY_API_KEY", ""),
-            "PATH": os.environ.get("PATH", "")
-        }
-    )
+    command="python",
+    args=[str(MCP_SERVER_PATH)],
+    env=os.environ.copy()
+)
     
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:

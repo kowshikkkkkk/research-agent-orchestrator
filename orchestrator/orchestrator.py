@@ -74,9 +74,34 @@ def web_research_node(state: ResearchState) -> ResearchState:
         return {"web_results": f"Web Research Agent unreachable: {str(e)}"}
 
 def rag_knowledge_node(state: ResearchState) -> ResearchState:
-    """Calls the RAG Knowledge Agent. Returns relevant docs from vector store."""
-    print(f"[Orchestrator] Calling RAG Knowledge Agent")
-    return {"rag_results": "[RAG STUB] Relevant knowledge base results"}
+    """
+    Calls the RAG Knowledge Agent via A2A protocol.
+    Returns knowledge base results to complement web research.
+    """
+    print(f"[Orchestrator] Calling RAG Knowledge Agent via A2A")
+    
+    try:
+        task_payload = {
+            "task_id": f"rag-{state['query'][:20].replace(' ', '-')}",
+            "input": {"query": state['query']},
+            "context": {}
+        }
+        
+        response = httpx.post(
+            "http://localhost:8002/tasks/send",
+            json=task_payload,
+            timeout=30.0
+        )
+        
+        result = response.json()
+        
+        if result["status"] == "completed":
+            return {"rag_results": result["output"]["synthesis"]}
+        else:
+            return {"rag_results": f"RAG search failed: {result['output'].get('error', 'Unknown error')}"}
+            
+    except Exception as e:
+        return {"rag_results": f"RAG Knowledge Agent unreachable: {str(e)}"}
 
 def market_data_node(state: ResearchState) -> ResearchState:
     """Calls the Market Data Agent. Returns structured market data."""
