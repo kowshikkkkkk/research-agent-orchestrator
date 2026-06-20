@@ -75,11 +75,53 @@ def rag_knowledge_node(state: ResearchState) -> ResearchState:
         return {"rag_results": f"RAG Knowledge Agent unreachable: {str(e)}"}
 
 def market_data_node(state: ResearchState) -> ResearchState:
-    print(f"[Orchestrator] Calling Market Data Agent")
-    return {"market_data": "[MARKET STUB] Market data results"}
+    print(f"[Orchestrator] Calling Market Data Agent via A2A")
+    try:
+        task_payload = {
+            "task_id": f"market-{state['query'][:20].replace(' ', '-')}",
+            "input": {"query": state['query']},
+            "context": {}
+        }
+        response = httpx.post(
+            "http://localhost:8003/tasks/send",
+            json=task_payload,
+            timeout=30.0
+        )
+        result = response.json()
+        if result["status"] == "completed":
+            return {"market_data": result["output"]["market_data"]}
+        else:
+            return {"market_data": f"Market data failed: {result['output'].get('error', 'Unknown')}"}
+    except Exception as e:
+        return {"market_data": f"Market Data Agent unreachable: {str(e)}"}
 
 def report_synthesis_node(state: ResearchState) -> ResearchState:
-    print(f"[Orchestrator] Synthesizing report")
+    print(f"[Orchestrator] Calling Report Synthesis Agent via A2A")
+    try:
+        task_payload = {
+            "task_id": f"synthesis-{state['query'][:20].replace(' ', '-')}",
+            "input": {
+                "query": state['query'],
+                "web_results": state['web_results'],
+                "rag_results": state['rag_results'],
+                "market_data": state['market_data'],
+                "critique": state.get('critique', ''),
+                "retry_count": state.get('retry_count', 0)
+            },
+            "context": {}
+        }
+        response = httpx.post(
+            "http://localhost:8004/tasks/send",
+            json=task_payload,
+            timeout=60.0
+        )
+        result = response.json()
+        if result["status"] == "completed":
+            return {"report": result["output"]["report"]}
+        else:
+            return {"report": f"Synthesis failed: {result['output'].get('error', 'Unknown')}"}
+    except Exception as e:
+        return {"report": f"Report Synthesis Agent unreachable: {str(e)}"}
 
     # Include critique in prompt if this is a retry
     # This is what makes the retry loop intelligent —
