@@ -6,13 +6,14 @@ from typing import Any
 import uuid
 import time
 from agents.market_data.agent import run_market_data_research
+from guardrails.guardrails import guard_a2a_task
 
 app = FastAPI(title="Market Data Agent")
 
 AGENT_CARD = {
     "name": "Market Data Agent",
     "version": "1.0.0",
-    "description": "Fetches quantitative market data — sizes, growth rates, funding amounts, statistics",
+    "description": "Fetches quantitative market data",
     "capabilities": ["market_size", "growth_rates", "funding_data", "statistics"],
     "input_schema": {
         "type": "object",
@@ -50,8 +51,20 @@ def handle_task(task: A2ATask) -> A2ATaskResult:
     task_id = task.task_id or str(uuid.uuid4())
     start_time = time.time()
 
+    guard_result = guard_a2a_task(task.input, source="market_data_agent")
+    if not guard_result["safe"]:
+        return A2ATaskResult(
+            task_id=task_id,
+            status="blocked",
+            output={"error": "Content blocked by guardrails", "violations": guard_result["violations"]},
+            agent_name="market_data",
+            execution_time_ms=round((time.time() - start_time) * 1000, 2)
+        )
+
+    sanitized_input = guard_result["sanitized_input"]
+
     try:
-        query = task.input.get("query", "")
+        query = sanitized_input.get("query", "")
         if not query:
             return A2ATaskResult(
                 task_id=task_id,

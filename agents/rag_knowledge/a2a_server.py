@@ -6,6 +6,7 @@ from typing import Any
 import uuid
 import time
 from agents.rag_knowledge.agent import run_rag_research, ingest_document
+from guardrails.guardrails import guard_a2a_task
 
 app = FastAPI(title="RAG Knowledge Agent")
 
@@ -18,7 +19,7 @@ AGENT_CARD = {
         "type": "object",
         "properties": {
             "query": {"type": "string"},
-            "ingest": {"type": "object", "description": "Optional — ingest a document instead of searching"}
+            "ingest": {"type": "object"}
         },
         "required": ["query"]
     },
@@ -50,11 +51,25 @@ def health_check():
 def handle_task(task: A2ATask) -> A2ATaskResult:
     task_id = task.task_id or str(uuid.uuid4())
     start_time = time.time()
-    
+
+    guard_result = guard_a2a_task(task.input, source="rag_knowledge_agent")
+    if not guard_result["safe"]:
+        return A2ATaskResult(
+            task_id=task_id,
+            status="blocked",
+            output={
+                "error": "Content blocked by guardrails",
+                "violations": guard_result["violations"]
+            },
+            agent_name="rag_knowledge",
+            execution_time_ms=round((time.time() - start_time) * 1000, 2)
+        )
+
+    sanitized_input = guard_result["sanitized_input"]
+
     try:
-        # Check if this is an ingest request
-        if "ingest" in task.input:
-            ingest_data = task.input["ingest"]
+        if "ingest" in sanitized_input:
+            ingest_data = sanitized_input["ingest"]
             result = ingest_document(
                 text=ingest_data.get("text", ""),
                 source=ingest_data.get("source", "unknown"),
@@ -67,9 +82,8 @@ def handle_task(task: A2ATask) -> A2ATaskResult:
                 agent_name="rag_knowledge",
                 execution_time_ms=round((time.time() - start_time) * 1000, 2)
             )
-        
-        # Otherwise it's a search request
-        query = task.input.get("query", "")
+
+        query = sanitized_input.get("query", "")
         if not query:
             return A2ATaskResult(
                 task_id=task_id,
@@ -78,9 +92,9 @@ def handle_task(task: A2ATask) -> A2ATaskResult:
                 agent_name="rag_knowledge",
                 execution_time_ms=0
             )
-        
+
         result = run_rag_research(query)
-        
+
         return A2ATaskResult(
             task_id=task_id,
             status="completed",
@@ -88,7 +102,7 @@ def handle_task(task: A2ATask) -> A2ATaskResult:
             agent_name="rag_knowledge",
             execution_time_ms=round((time.time() - start_time) * 1000, 2)
         )
-        
+
     except Exception as e:
         return A2ATaskResult(
             task_id=task_id,

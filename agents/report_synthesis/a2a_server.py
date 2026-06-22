@@ -6,6 +6,7 @@ from typing import Any
 import uuid
 import time
 from agents.report_synthesis.agent import run_report_synthesis
+from guardrails.guardrails import guard_a2a_task
 
 app = FastAPI(title="Report Synthesis Agent")
 
@@ -55,15 +56,29 @@ def handle_task(task: A2ATask) -> A2ATaskResult:
     task_id = task.task_id or str(uuid.uuid4())
     start_time = time.time()
 
+    guard_result = guard_a2a_task(task.input, source="report_synthesis_agent")
+    if not guard_result["safe"]:
+        return A2ATaskResult(
+            task_id=task_id,
+            status="blocked",
+            output={
+                "error": "Content blocked by guardrails",
+                "violations": guard_result["violations"]
+            },
+            agent_name="report_synthesis",
+            execution_time_ms=round((time.time() - start_time) * 1000, 2)
+        )
+
+    sanitized_input = guard_result["sanitized_input"]
+
     try:
-        inp = task.input
         result = run_report_synthesis(
-            query=inp.get("query", ""),
-            web_results=inp.get("web_results", ""),
-            rag_results=inp.get("rag_results", ""),
-            market_data=inp.get("market_data", ""),
-            critique=inp.get("critique", ""),
-            retry_count=inp.get("retry_count", 0)
+            query=sanitized_input.get("query", ""),
+            web_results=sanitized_input.get("web_results", ""),
+            rag_results=sanitized_input.get("rag_results", ""),
+            market_data=sanitized_input.get("market_data", ""),
+            critique=sanitized_input.get("critique", ""),
+            retry_count=sanitized_input.get("retry_count", 0)
         )
 
         return A2ATaskResult(
