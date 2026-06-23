@@ -12,7 +12,10 @@ load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
 print("[RAG Agent] Loading embedding model...")
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
-qdrant = QdrantClient(host="localhost", port=6333)
+qdrant = QdrantClient(
+    host=os.getenv("QDRANT_HOST", "localhost"),
+    port=int(os.getenv("QDRANT_PORT", "6333"))
+)
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     api_key=os.getenv("GROQ_API_KEY"),

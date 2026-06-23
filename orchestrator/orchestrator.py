@@ -11,6 +11,17 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.redis import RedisSaver
 from langchain_groq import ChatGroq
 
+# ── AGENT URLs ────────────────────────────────────────────────────────────────
+# Defaults to localhost for local development.
+# In Docker Compose, these are overridden via environment variables
+# to use service names: http://web_research:8001 etc.
+
+WEB_RESEARCH_URL = os.getenv("WEB_RESEARCH_URL", "http://localhost:8001")
+RAG_KNOWLEDGE_URL = os.getenv("RAG_KNOWLEDGE_URL", "http://localhost:8002")
+MARKET_DATA_URL = os.getenv("MARKET_DATA_URL", "http://localhost:8003")
+REPORT_SYNTHESIS_URL = os.getenv("REPORT_SYNTHESIS_URL", "http://localhost:8004")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+
 # ── LLM ───────────────────────────────────────────────────────────────────────
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
@@ -41,7 +52,7 @@ def web_research_node(state: ResearchState) -> ResearchState:
             "context": {}
         }
         response = httpx.post(
-            "http://localhost:8001/tasks/send",
+            f"{WEB_RESEARCH_URL}/tasks/send",
             json=task_payload,
             timeout=30.0
         )
@@ -62,7 +73,7 @@ def rag_knowledge_node(state: ResearchState) -> ResearchState:
             "context": {}
         }
         response = httpx.post(
-            "http://localhost:8002/tasks/send",
+            f"{RAG_KNOWLEDGE_URL}/tasks/send",
             json=task_payload,
             timeout=30.0
         )
@@ -83,7 +94,7 @@ def market_data_node(state: ResearchState) -> ResearchState:
             "context": {}
         }
         response = httpx.post(
-            "http://localhost:8003/tasks/send",
+            f"{MARKET_DATA_URL}/tasks/send",
             json=task_payload,
             timeout=30.0
         )
@@ -111,7 +122,7 @@ def report_synthesis_node(state: ResearchState) -> ResearchState:
             "context": {}
         }
         response = httpx.post(
-            "http://localhost:8004/tasks/send",
+            f"{REPORT_SYNTHESIS_URL}/tasks/send",
             json=task_payload,
             timeout=60.0
         )
@@ -122,35 +133,6 @@ def report_synthesis_node(state: ResearchState) -> ResearchState:
             return {"report": f"Synthesis failed: {result['output'].get('error', 'Unknown')}"}
     except Exception as e:
         return {"report": f"Report Synthesis Agent unreachable: {str(e)}"}
-
-    # Include critique in prompt if this is a retry
-    # This is what makes the retry loop intelligent —
-    # the synthesis node knows WHY it failed and tries to fix it
-    critique_context = ""
-    if state.get("critique") and state.get("retry_count", 0) > 0:
-        critique_context = f"""
-Previous report was rejected. Critic feedback:
-{state['critique']}
-
-Address these issues in this improved version.
-"""
-
-    prompt = f"""You are a business intelligence analyst.
-
-Based on the following research, write a structured report answering the query.
-{critique_context}
-Query: {state['query']}
-
-Web Research: {state['web_results']}
-Knowledge Base: {state['rag_results']}
-Market Data: {state['market_data']}
-
-Write a clear, structured report with sections:
-Executive Summary, Key Findings, Market Analysis, Conclusion.
-Be specific — include company names, statistics, and market data where available."""
-
-    response = llm.invoke(prompt)
-    return {"report": response.content}
 
 def critic_node(state: ResearchState) -> ResearchState:
     print(f"[Orchestrator] Critic Agent evaluating report quality")
@@ -238,21 +220,17 @@ def build_graph():
 
 # ── RUN WITH REDIS MEMORY ─────────────────────────────────────────────────────
 
-# ── RUN WITH REDIS MEMORY ─────────────────────────────────────────────────────
-
 if __name__ == "__main__":
-    REDIS_URL = "redis://localhost:6379"
-    
     with RedisSaver.from_conn_string(REDIS_URL) as checkpointer:
         checkpointer.setup()
         graph = build_graph().compile(checkpointer=checkpointer)
-        
+
         config = {"configurable": {"thread_id": "research-session-001"}}
-        
+
         print("\n" + "="*60)
         print("QUERY 1: Initial research")
         print("="*60)
-        
+
         result1 = graph.invoke({
             "query": "What is the competitive landscape for fintech lending in Southeast Asia?",
             "web_results": "",
@@ -264,28 +242,8 @@ if __name__ == "__main__":
             "retry_count": 0,
             "final_output": ""
         }, config)
-        
+
         print("\nFINAL REPORT:")
         print(result1['final_output'])
         print(f"\nQuality Score: {result1['quality_score']}")
         print(f"Retries: {result1['retry_count']}")
-        
-        print("\n" + "="*60)
-        print("QUERY 2: Follow-up (uses Redis memory from Query 1)")
-        print("="*60)
-        
-        result2 = graph.invoke({
-            "query": "Which of the companies mentioned are based in Singapore?",
-            "web_results": "",
-            "rag_results": "",
-            "market_data": "",
-            "report": "",
-            "critique": "",
-            "quality_score": 0.0,
-            "retry_count": 0,
-            "final_output": ""
-        }, config)
-        
-        print("\nFOLLOW-UP REPORT:")
-        print(result2['final_output'])
-        print(f"\nQuality Score: {result2['quality_score']}")
