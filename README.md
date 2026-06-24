@@ -1,4 +1,5 @@
-# Enterprise Research Intelligence Platform
+research-agent-orchestrator
+
 
 A production-grade multi-agent AI system that answers complex business research queries by orchestrating specialized agents, each running as an independent microservice communicating via Google's A2A protocol.
 
