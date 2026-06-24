@@ -313,21 +313,6 @@ Input → check_prompt_injection() → check_unsafe_content() → check_length()
 
 ---
 
-## Production Gaps (Honest Assessment)
-
-This system is designed with production patterns throughout. The following are known compromises made for a portfolio/demo context:
-
-| Component | Current State | Production Solution |
-|---|---|---|
-| Redis | Single node | Redis Cluster or Redis Sentinel |
-| Critic Agent | Inside Orchestrator | Independent service on port 8005 |
-| MCP Transport | Direct calls (Windows stdio limitation) | SSE transport on Linux |
-| Knowledge Base | Manual ingestion | Automated pipeline with document watchers |
-| RAG Evaluation | Critic heuristics | Full RAGAS metrics (faithfulness, relevance, precision) |
-| Guardrails | Rule-based regex | ML-based detection for sophisticated attacks |
-
----
-
 ## Sample Output
 
 **Query:** "What is the competitive landscape for fintech lending in Southeast Asia?"
