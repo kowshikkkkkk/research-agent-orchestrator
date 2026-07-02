@@ -1,6 +1,5 @@
 ## Research-Agent-Orchestrator
 
-
 A production-grade multi-agent AI system that answers complex business research queries by orchestrating specialized agents, each running as an independent microservice communicating via Google's A2A protocol.
 
 **Ask it:** *"What is the competitive landscape for fintech lending in Southeast Asia?"*
@@ -11,27 +10,29 @@ A production-grade multi-agent AI system that answers complex business research 
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    A["User Query"] --> B["Orchestrator\nLangGraph Supervisor + Redis Checkpointer"]
+    B -->|"A2A"| C["Web Research Agent\nport 8001 - Tavily live web search"]
+    B -->|"A2A"| D["RAG Knowledge Agent\nport 8002 - Qdrant vector retrieval"]
+    B -->|"A2A"| E["Market Data Agent\nport 8003 - Quantitative data extraction"]
+    B -->|"A2A"| F["Report Synthesis Agent\nport 8004 - Structured report generation"]
+    C --> G["Critic Agent\nquality gate"]
+    D --> G
+    E --> G
+    F --> G
+    G -->|"score 0.7 or above"| H["Ship to user"]
+    G -->|"score below 0.7, retries remaining"| F
 ```
-User Query
-    ↓
-Orchestrator (LangGraph Supervisor + Redis Checkpointer)
-    ↓
-    ├──[A2A]──→ Web Research Agent       (port 8001) — Tavily live web search
-    ├──[A2A]──→ RAG Knowledge Agent      (port 8002) — Qdrant vector retrieval
-    ├──[A2A]──→ Market Data Agent        (port 8003) — Quantitative data extraction
-    └──[A2A]──→ Report Synthesis Agent   (port 8004) — Structured report generation
-                        ↓
-                Critic Agent (quality gate)
-                SCORE ≥ 0.7 → ship to user
-                SCORE < 0.7 → retry with critique (max 2 retries)
 
-Infrastructure:
-├── Redis          — LangGraph session checkpointing across queries
-├── Qdrant         — Production vector database for RAG
-├── LangSmith      — Automatic tracing of all LangGraph nodes and LLM calls
-├── Guardrails AI  — Prompt injection detection at every A2A boundary
-└── Docker Compose — Single command deployment of entire platform
-```
+**Infrastructure**
+- **Redis** — LangGraph session checkpointing across queries
+- **Qdrant** — Production vector database for RAG
+- **LangSmith** — Automatic tracing of all LangGraph nodes and LLM calls
+- **Guardrails AI** — Prompt injection detection at every A2A boundary
+- **Docker Compose** — Single command deployment of entire platform
+
+*Retry is capped at 2 attempts — if the score is still below 0.7 after that, the best available report ships with its quality score attached rather than looping indefinitely.*
 
 ---
 
@@ -72,7 +73,6 @@ Qdrant runs locally via Docker for development and deploys identically to cloud 
 ### Why all-MiniLM-L6-v2?
 
 This sentence transformer produces 384-dimensional embeddings and runs locally without an API call. For a system that may ingest hundreds of documents, making an API call per chunk would be slow and expensive. The model is small enough (90MB) to load at startup and fast enough to embed thousands of chunks in seconds. In production with higher quality requirements you would use a larger model or OpenAI's text-embedding-3-large — but the RAG architecture is identical.
-
 
 ### Why Guardrails AI?
 
@@ -260,15 +260,24 @@ enterprise-research-agent/
 
 ## How RAG Works in This System
 
-```
-INDEXING (one time per document)
-Document → chunk(500 chars, 50 overlap) → embed(all-MiniLM-L6-v2) → store(Qdrant)
-
-RETRIEVAL (every query)
-Query → embed(all-MiniLM-L6-v2) → cosine_similarity(Qdrant) → top-5 chunks
-
-GENERATION
-top-5 chunks + query → LLM prompt → grounded answer with source attribution
+```mermaid
+flowchart TD
+    subgraph Indexing["Indexing - one time per document"]
+        A1["Document"] --> A2["Chunk\n500 chars, 50 overlap"]
+        A2 --> A3["Embed\nall-MiniLM-L6-v2"]
+        A3 --> A4["Store in Qdrant"]
+    end
+    subgraph Retrieval["Retrieval - every query"]
+        B1["Query"] --> B2["Embed\nall-MiniLM-L6-v2"]
+        B2 --> B3["Cosine similarity search in Qdrant"]
+        B3 --> B4["Top 5 chunks"]
+    end
+    subgraph Generation
+        C1["Top 5 chunks + query"] --> C2["LLM prompt"]
+        C2 --> C3["Grounded answer with source attribution"]
+    end
+    A4 -.-> B3
+    B4 --> C1
 ```
 
 The 500-character chunk size with 50-character overlap is deliberate. Smaller chunks lose context. Larger chunks exceed what fits usefully in a retrieval result. The overlap ensures sentences that span chunk boundaries are fully represented in at least one chunk.
@@ -298,8 +307,12 @@ The Critic evaluates four dimensions: specificity, named entities and data point
 
 Every A2A task passes through `guard_a2a_task()` before the agent processes it:
 
-```
-Input → check_prompt_injection() → check_unsafe_content() → check_length() → sanitize or block
+```mermaid
+flowchart LR
+    A["Input"] --> B["check_prompt_injection()"]
+    B --> C["check_unsafe_content()"]
+    C --> D["check_length()"]
+    D --> E["sanitize or block"]
 ```
 
 **Prompt injection patterns detected (12 total):**
@@ -334,8 +347,9 @@ Key players include Funding Societies, Akulaku, Grab Financial Group, and GoPay.
 - Philippines accounted for 59% of alternative lending deal volume in 2024 (Web Research)
 - Digital lending to surpass payments as primary revenue driver by 2025 (Web Research)
 ...
-'''
+```
 
+---
 
 ## Author
 
