@@ -1,14 +1,23 @@
+# mcp_servers/vector_search_mcp.py
+#
+# MCP server exposing vector_search and ingest_document tools, backed by
+# Qdrant + all-MiniLM-L6-v2. Runs over SSE transport for the same reason
+# as web_search_mcp.py — HTTP-based, no stdio pipe issues on Windows.
+
 import os
 import sys
 import json
-import asyncio
 from dotenv import load_dotenv
 from pathlib import Path
 from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.sse import SseServerTransport
 from mcp import types
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route, Mount
+import uvicorn
 
 load_dotenv(Path(__file__).parent.parent / '.env')
 
@@ -16,10 +25,14 @@ app = Server("vector-search-mcp-server")
 
 COLLECTION_NAME = "research_knowledge_base"
 VECTOR_SIZE = 384
+MCP_VECTOR_SEARCH_PORT = int(os.getenv("MCP_VECTOR_SEARCH_PORT", "8011"))
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 
 # Lazy globals — not loaded at import time
 embedder = None
 qdrant = None
+
 
 def get_embedder():
     global embedder
@@ -30,13 +43,13 @@ def get_embedder():
         print("[Vector MCP] Model loaded.", file=sys.stderr)
     return embedder
 
+
 def get_qdrant():
     global qdrant
     if qdrant is None:
-        qdrant = QdrantClient(host="localhost", port=6333)
+        qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
         collections = [c.name for c in qdrant.get_collections().collections]
         if COLLECTION_NAME not in collections:
-            from qdrant_client.models import Distance, VectorParams
             qdrant.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)
@@ -45,6 +58,7 @@ def get_qdrant():
         else:
             print(f"[Vector MCP] Collection exists: {COLLECTION_NAME}", file=sys.stderr)
     return qdrant
+
 
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
@@ -76,6 +90,7 @@ async def list_tools() -> list[types.Tool]:
         )
     ]
 
+
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
@@ -87,12 +102,12 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         emb = get_embedder()
         db = get_qdrant()
         query_vector = emb.encode(query).tolist()
-        results = db.search(
+        results = db.query_points(
             collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
             with_payload=True
-        )
+        ).points
 
         if not results:
             return [types.TextContent(type="text", text=json.dumps({
@@ -153,11 +168,28 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     else:
         return [types.TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
 
-async def main():
-    print("[Vector MCP] Server starting...", file=sys.stderr)
-    print("[Vector MCP] Tools registered: vector_search, ingest_document", file=sys.stderr)
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+
+# ── SSE TRANSPORT WIRING ──────────────────────────────────────────────────────
+sse = SseServerTransport("/messages/")
+
+
+async def handle_sse(request):
+    async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+        await app.run(streams[0], streams[1], app.create_initialization_options())
+
+
+async def health(request):
+    return JSONResponse({"status": "healthy", "server": "vector_search_mcp"})
+
+
+starlette_app = Starlette(routes=[
+    Route("/health", endpoint=health),
+    Route("/sse", endpoint=handle_sse),
+    Mount("/messages/", app=sse.handle_post_message),
+])
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    print(f"[Vector MCP] Starting SSE server on port {MCP_VECTOR_SEARCH_PORT}", file=sys.stderr)
+    print("[Vector MCP] Tools registered: vector_search, ingest_document", file=sys.stderr)
+    uvicorn.run(starlette_app, host="0.0.0.0", port=MCP_VECTOR_SEARCH_PORT)
