@@ -12,17 +12,25 @@ A production-grade multi-agent AI system that answers complex business research 
 
 ```mermaid
 flowchart TD
-    A["User Query"] --> B["Orchestrator\nLangGraph Supervisor + Redis Checkpointer"]
-    B -->|"A2A"| C["Web Research Agent\nport 8001 - Tavily live web search"]
-    B -->|"A2A"| D["RAG Knowledge Agent\nport 8002 - Qdrant vector retrieval"]
-    B -->|"A2A"| E["Market Data Agent\nport 8003 - Quantitative data extraction"]
-    B -->|"A2A"| F["Report Synthesis Agent\nport 8004 - Structured report generation"]
-    C --> G["Critic Agent\nquality gate"]
-    D --> G
-    E --> G
-    F --> G
-    G -->|"score 0.7 or above"| H["Ship to user"]
-    G -->|"score below 0.7, retries remaining"| F
+    A["User Query"]
+    --> B["FastAPI Orchestrator<br/>LangGraph + Redis Checkpointer"]
+
+    B -->|"A2A Task"| C["Web Research Agent<br/>Port 8001<br/>Tavily Search"]
+    C -->|"Update State"| B
+
+    B -->|"A2A Task"| D["RAG Knowledge Agent<br/>Port 8002<br/>Qdrant Retrieval"]
+    D -->|"Update State"| B
+
+    B -->|"A2A Task"| E["Market Data Agent<br/>Port 8003<br/>Market Data Extraction"]
+    E -->|"Update State"| B
+
+    B -->|"A2A Task"| F["Report Synthesis Agent<br/>Port 8004<br/>Generate Final Report"]
+    F -->|"Generated Report"| G["Critic Node<br/>Quality Evaluation"]
+
+    G -->|"Score ≥ 0.7"| H["Return Final Report"]
+
+    G -->|"Score < 0.7 & Retry Available"| I["Increment Retry Counter"]
+    I --> F
 ```
 
 **Infrastructure**
