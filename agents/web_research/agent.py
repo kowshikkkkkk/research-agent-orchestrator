@@ -1,10 +1,11 @@
 # agents/web_research/agent.py
 
 import os
+import json
 from dotenv import load_dotenv
 from pathlib import Path
-from tavily import TavilyClient
 from langchain_groq import ChatGroq
+from mcp_servers.mcp_client import call_mcp_tool_sync
 
 load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
@@ -14,23 +15,25 @@ llm = ChatGroq(
     temperature=0.1
 )
 
-tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+# This agent no longer imports TavilyClient directly. It calls the
+# web_search tool on the Web Search MCP server over SSE — the MCP
+# server owns the Tavily client and credentials, this agent just
+# consumes the tool through the standard MCP interface.
+MCP_WEB_SEARCH_URL = os.getenv("MCP_WEB_SEARCH_URL", "http://localhost:8010")
 
 def run_web_research(query: str) -> dict:
     print(f"[Web Research Agent] Searching for: {query}")
 
-    search_response = tavily.search(
-        query=query,
-        max_results=5,
-        search_depth="advanced"
+    raw = call_mcp_tool_sync(
+        MCP_WEB_SEARCH_URL,
+        "web_search",
+        {"query": query, "max_results": 5, "search_depth": "advanced"}
     )
+    data = json.loads(raw)
 
-    results = search_response.get("results", [])
-    sources = [r.get("url", "") for r in results]
-    raw_content = "\n\n".join([
-        f"Source: {r.get('url', '')}\nContent: {r.get('content', '')}"
-        for r in results
-    ])
+    raw_content = data.get("results", "")
+    sources = data.get("sources", [])
+    result_count = data.get("result_count", 0)
 
     prompt = f"""You are a web research specialist for business intelligence.
 
@@ -55,5 +58,5 @@ Be specific and cite which source each finding comes from."""
         "query": query,
         "synthesis": response.content,
         "sources": sources,
-        "raw_results_count": len(results)
+        "raw_results_count": result_count
     }

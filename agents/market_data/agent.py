@@ -1,10 +1,11 @@
 # agents/market_data/agent.py
 
 import os
+import json
 from dotenv import load_dotenv
 from pathlib import Path
-from tavily import TavilyClient
 from langchain_groq import ChatGroq
+from mcp_servers.mcp_client import call_mcp_tool_sync
 
 load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
@@ -14,7 +15,11 @@ llm = ChatGroq(
     temperature=0.1
 )
 
-tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+# Same MCP web search tool as the Web Research Agent — one server,
+# two different consumers with two different prompt strategies.
+# This is the reuse benefit of MCP: the tool doesn't know or care
+# which agent is calling it or why.
+MCP_WEB_SEARCH_URL = os.getenv("MCP_WEB_SEARCH_URL", "http://localhost:8010")
 
 def run_market_data_research(query: str) -> dict:
     """
@@ -26,22 +31,20 @@ def run_market_data_research(query: str) -> dict:
     """
     print(f"[Market Data Agent] Fetching market data for: {query}")
 
-    # We append "market size statistics data" to bias Tavily
+    # We append "market size statistics data" to bias the search
     # toward quantitative sources like reports and filings
     market_query = f"{query} market size statistics growth rate funding data 2024"
 
-    search_response = tavily.search(
-        query=market_query,
-        max_results=5,
-        search_depth="advanced"
+    raw = call_mcp_tool_sync(
+        MCP_WEB_SEARCH_URL,
+        "web_search",
+        {"query": market_query, "max_results": 5, "search_depth": "advanced"}
     )
+    data = json.loads(raw)
 
-    results = search_response.get("results", [])
-    sources = [r.get("url", "") for r in results]
-    raw_content = "\n\n".join([
-        f"Source: {r.get('url', '')}\nContent: {r.get('content', '')}"
-        for r in results
-    ])
+    raw_content = data.get("results", "")
+    sources = data.get("sources", [])
+    result_count = data.get("result_count", 0)
 
     prompt = f"""You are a market data specialist. Extract only quantitative data from the search results.
 
@@ -68,5 +71,5 @@ Do not include vague statements — numbers only."""
         "query": query,
         "market_data": response.content,
         "sources": sources,
-        "data_points_found": len(results)
+        "data_points_found": result_count
     }
