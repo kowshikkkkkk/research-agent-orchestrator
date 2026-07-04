@@ -41,6 +41,38 @@ async def _call_mcp_tool_async(server_url: str, tool_name: str, arguments: dict)
             if not result.content:
                 return "{}"
             return result.content[0].text
+async def _discover_mcp_tools_async(server_url: str) -> list[dict]:
+    """
+    Calls the MCP server's list_tools() and converts each tool into the
+    OpenAI function-calling format (name/description/parameters) that
+    LangChain's bind_tools() accepts directly. This is what makes tool
+    selection dynamic rather than hardcoded: if a new tool gets added to
+    the MCP server, the agent picks it up automatically next call — no
+    code change needed here.
+    """
+    async with sse_client(url=f"{server_url}/sse") as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools_result = await session.list_tools()
+            return [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.inputSchema,
+                    },
+                }
+                for t in tools_result.tools
+            ]
+
+
+def discover_mcp_tools_sync(server_url: str) -> list[dict]:
+    """
+    Synchronous entry point for tool discovery. Returns a list ready to
+    pass straight into llm.bind_tools(...).
+    """
+    return asyncio.run(_discover_mcp_tools_async(server_url))
 
 
 def call_mcp_tool_sync(server_url: str, tool_name: str, arguments: dict) -> str:
