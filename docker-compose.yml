@@ -53,28 +53,6 @@ services:
   # MCP server exposing vector_search / ingest_document tools (backed by
   # Qdrant + all-MiniLM-L6-v2). Owns the embedding model and Qdrant client
   # so no other service needs to load them directly.
-  mcp_vector_search:
-    image: enterprise-research-agent:latest
-    container_name: mcp_vector_search
-    command: python -m mcp_servers.vector_search_mcp
-    ports:
-      - "8011:8011"
-    env_file:
-      - .env
-    environment:
-      MCP_VECTOR_SEARCH_PORT: 8011
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: 6333
-    depends_on:
-      qdrant:
-        condition: service_healthy
-    healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:8011/health || exit 1" ]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
   web_research:
     build: .
     image: enterprise-research-agent:latest
@@ -107,11 +85,12 @@ services:
     env_file:
       - .env
     environment:
-      MCP_VECTOR_SEARCH_URL: http://mcp_vector_search:8011
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
     depends_on:
       web_research:
         condition: service_started
-      mcp_vector_search:
+      qdrant:
         condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8002/health || exit 1" ]

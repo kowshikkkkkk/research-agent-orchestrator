@@ -19,7 +19,7 @@ AGENT_CARD = {
         "type": "object",
         "properties": {
             "query": {"type": "string"},
-            "ingest": {"type": "object"}
+            "ingest": {"type": "object", "description": "Optional — ingest a document instead of searching"}
         },
         "required": ["query"]
     },
@@ -77,7 +77,7 @@ def handle_task(task: A2ATask) -> A2ATaskResult:
             )
             return A2ATaskResult(
                 task_id=task_id,
-                status="completed",
+                status="completed" if result.get("status") == "success" else "failed",
                 output=result,
                 agent_name="rag_knowledge",
                 execution_time_ms=round((time.time() - start_time) * 1000, 2)

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "q1_fintech",
+    "category": "fintech",
+    "query": "What is the competitive landscape for fintech lending in Southeast Asia?",
+    "expected_keywords": ["fintech", "lending", "Southeast Asia"]
+  },
+  {
+    "id": "q2_ev_batteries",
+    "category": "cleantech",
+    "query": "What is the state of the electric vehicle battery supply chain in 2026?",
+    "expected_keywords": ["battery", "electric vehicle", "supply chain"]
+  },
+  {
+    "id": "q3_genai_enterprise",
+    "category": "enterprise_ai",
+    "query": "How are enterprises adopting generative AI for internal operations in 2026?",
+    "expected_keywords": ["generative AI", "enterprise", "adoption"]
+  },
+  {
+    "id": "q4_healthcare_ai",
+    "category": "healthcare",
+    "query": "What is the market outlook for AI-powered medical diagnostics?",
+    "expected_keywords": ["healthcare", "diagnostics", "AI"]
+  },
+  {
+    "id": "q5_cyber_smb",
+    "category": "cybersecurity",
+    "query": "What cybersecurity solutions are gaining traction among small and medium businesses?",
+    "expected_keywords": ["cybersecurity", "small", "medium"]
+  },
+  {
+    "id": "q6_renewable_storage",
+    "category": "cleantech",
+    "query": "Which startups are leading innovation in renewable energy storage?",
+    "expected_keywords": ["renewable", "energy storage", "startup"]
+  },
+  {
+    "id": "q7_ecommerce_logistics",
+    "category": "logistics",
+    "query": "How is automation transforming e-commerce logistics and fulfillment?",
+    "expected_keywords": ["e-commerce", "logistics", "automation"]
+  },
+  {
+    "id": "q8_agentic_ai_tools",
+    "category": "developer_tools",
+    "query": "What are the leading agentic AI frameworks and tools being adopted by developers in 2026?",
+    "expected_keywords": ["agent", "framework", "developer"]
+  }
+]

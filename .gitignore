@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 chroma_db/
 mlruns/*~
+
+# Eval run outputs (full report text; keep the harness code, not every run)
+evals/results/*.json
