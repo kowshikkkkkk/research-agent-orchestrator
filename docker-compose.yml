@@ -11,10 +11,11 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1" ]
+      test: [ "CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/6333' || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   redis:
     image: redis:latest
@@ -29,6 +30,51 @@ services:
       timeout: 5s
       retries: 5
 
+  # MCP server exposing web_search / news_search tools (backed by Tavily).
+  # Runs over SSE — HTTP-based, so it's a normal service like any other
+  # container here, not a stdio subprocess.
+  mcp_web_search:
+    image: enterprise-research-agent:latest
+    container_name: mcp_web_search
+    command: python -m mcp_servers.web_search_mcp
+    ports:
+      - "8010:8010"
+    env_file:
+      - .env
+    environment:
+      MCP_WEB_SEARCH_PORT: 8010
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8010/health || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # MCP server exposing vector_search / ingest_document tools (backed by
+  # Qdrant + all-MiniLM-L6-v2). Owns the embedding model and Qdrant client
+  # so no other service needs to load them directly.
+  mcp_vector_search:
+    image: enterprise-research-agent:latest
+    container_name: mcp_vector_search
+    command: python -m mcp_servers.vector_search_mcp
+    ports:
+      - "8011:8011"
+    env_file:
+      - .env
+    environment:
+      MCP_VECTOR_SEARCH_PORT: 8011
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8011/health || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
   web_research:
     build: .
     image: enterprise-research-agent:latest
@@ -38,8 +84,12 @@ services:
       - "8001:8001"
     env_file:
       - .env
+    environment:
+      MCP_WEB_SEARCH_URL: http://mcp_web_search:8010
     depends_on:
       redis:
+        condition: service_healthy
+      mcp_web_search:
         condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8001/health || exit 1" ]
@@ -57,11 +107,12 @@ services:
     env_file:
       - .env
     environment:
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: 6333
+      MCP_VECTOR_SEARCH_URL: http://mcp_vector_search:8011
     depends_on:
-      - web_research
-      - qdrant
+      web_research:
+        condition: service_started
+      mcp_vector_search:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8002/health || exit 1" ]
       interval: 15s
@@ -77,8 +128,13 @@ services:
       - "8003:8003"
     env_file:
       - .env
+    environment:
+      MCP_WEB_SEARCH_URL: http://mcp_web_search:8010
     depends_on:
-      - web_research
+      web_research:
+        condition: service_started
+      mcp_web_search:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8003/health || exit 1" ]
       interval: 15s
