@@ -26,7 +26,7 @@ flowchart TD
     D -->|"Update State"| B
 
     B -->|"A2A Task"| E["Market Data Agent<br/>Port 8003"]
-    E -->|"always web_search<br/>biased query"| C1
+    
     E -->|"Update State"| B
 
     C -.->|"synthesis"| L["Groq Llama 3.3 70B"]
