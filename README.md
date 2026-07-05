@@ -15,26 +15,35 @@ flowchart TD
     A["User Query"]
     --> B["FastAPI Orchestrator<br/>LangGraph + Redis Checkpointer"]
 
-    B -->|"A2A Task"| C["Web Research Agent<br/>Port 8001<br/>LLM picks tool"]
-    C --> C1["MCP Web Search<br/>SSE · Port 8010"]
-    C1 --> C2["Tavily API"]
+    B -->|"A2A Task"| C["Web Research Agent<br/>Port 8001"]
+    C -->|"LLM picks one of 3"| C1["MCP Web Search<br/>SSE · Port 8010"]
+    C1 -->|"web_search OR news_search"| C2["Tavily API"]
+    C1 -->|"wikipedia_background"| C3["Wikipedia API"]
     C -->|"Update State"| B
 
     B -->|"A2A Task"| D["RAG Knowledge Agent<br/>Port 8002<br/>Direct Qdrant integration"]
     D --> D1["Qdrant<br/>Vector DB"]
     D -->|"Update State"| B
 
-    B -->|"A2A Task"| E["Market Data Agent<br/>Port 8003<br/>Biased market query"]
-    E --> C1
+    B -->|"A2A Task"| E["Market Data Agent<br/>Port 8003"]
+    E -->|"always web_search<br/>biased query"| C1
     E -->|"Update State"| B
 
+    C -.->|"synthesis"| L["Groq Llama 3.3 70B"]
+    D -.->|"synthesis"| L
+    E -.->|"extraction"| L
+
     B -->|"A2A Task"| F["Report Synthesis Agent<br/>Port 8004"]
+    F -.->|"drafting"| L
     F -->|"Generated Report"| G["Critic Node<br/>Quality Evaluation"]
+    G -.->|"scoring"| L
 
     G -->|"Score ≥ 0.7"| H["Return Final Report"]
     G -->|"Score < 0.7 & Retry Available"| I["Increment Retry Counter"]
     I --> F
 ```
+
+**Tool access is not symmetric between the two MCP consumers.** Web Research can call any of three tools — `web_search`, `news_search` (both Tavily), or `wikipedia_background` (Wikipedia, a genuinely different provider) — the LLM picks one per query based on what the question actually needs. Market Data can only ever call `web_search`, always with the same biased-query pattern — it has access to a tool, just not a choice between tools.
 
 **Infrastructure**
 - **Redis** — LangGraph session checkpointing across queries
@@ -88,7 +97,7 @@ This sentence transformer produces 384-dimensional embeddings and runs locally w
 
 MCP standardizes how an agent connects to a tool. Instead of an agent importing a provider's SDK directly (tight coupling — swapping providers means editing agent code), it calls a tool by name through a standard interface with no knowledge of what runs underneath.
 
-**One MCP server is implemented and running**, `mcp_servers/web_search_mcp.py`, exposing `web_search` and `news_search` (both backed by Tavily). It runs over **SSE transport** (not stdio) as an independent service on port 8010, with its own health check, consumed by both the Web Research and Market Data agents.
+**One MCP server is implemented and running**, `mcp_servers/web_search_mcp.py`, exposing three tools backed by two different providers: `web_search` and `news_search` (both Tavily), and `wikipedia_background` (Wikipedia — no API key required, genuinely different content: encyclopedic/background rather than live web crawl). It runs over **SSE transport** (not stdio) as an independent service on port 8010, with its own health check, consumed by both the Web Research and Market Data agents.
 
 **Why SSE instead of stdio:** MCP's stdio transport has a known limitation on Windows — Python's `ProactorEventLoop` breaks pipe communication silently. SSE is plain HTTP underneath, so it works identically on Windows, Linux, and inside Docker, and — critically — it means the MCP server can run as a normal networked service in `docker-compose.yml`, reachable by other containers via its service name, rather than needing to live in the same process as its caller.
 
@@ -96,7 +105,7 @@ MCP standardizes how an agent connects to a tool. Instead of an agent importing 
 
 ### Why dynamic tool selection (and where it stops)
 
-The Web Research agent doesn't hardcode which MCP tool it calls. At request time, it calls the MCP server's `list_tools()` to discover what's available, converts the result into OpenAI-format function schemas, and binds them to the LLM with `bind_tools()`. The model itself decides — based on the query — whether to call `web_search` (general/background research) or `news_search` (recent-events-shaped queries), and with what search terms. This is genuine agentic tool use: the choice is made by the model at runtime, not by a hardcoded string in the Python code.
+The Web Research agent doesn't hardcode which MCP tool it calls. At request time, it calls the MCP server's `list_tools()` to discover what's available, converts the result into OpenAI-format function schemas, and binds them to the LLM with `bind_tools()`. The model itself decides — based on the query — whether to call `web_search` (general/current information, live crawl), `news_search` (recent-events-shaped queries), or `wikipedia_background` (evergreen/definitional questions, a genuinely different provider from the other two), and with what search terms. This is genuine agentic tool use: the choice is made by the model at runtime, not by a hardcoded string in the Python code. Verified in practice: "how does a vector database work" correctly triggers `wikipedia_background`, "latest funding news for fintech startups" triggers `news_search`, and "current competitors in the ride-sharing market" triggers `web_search` — three different queries, three different tool choices, no hardcoded branching.
 
 **This is intentionally scoped to one agent.** The Market Data agent always calls `web_search` with a deterministically market-biased query (`"{query} market size statistics growth rate funding data 2024"`) — that's correct for its job, not a missed opportunity, since its whole purpose is steering toward one specific kind of result every time. Similarly, the agent execution *order* in the orchestrator graph is fixed and sequential (`web_research → rag_knowledge → market_data → report_synthesis`) regardless of query content — dynamic tool selection changed one decision inside one agent's execution, not which agents run or in what order.
 
@@ -133,7 +142,7 @@ Without it, running this system requires 6+ terminals: Qdrant, Redis, the MCP we
 | Orchestration | LangGraph | Conditional routing, Redis checkpointing, LangSmith integration |
 | Agent Communication | A2A Protocol | Standardized agent discovery and task delegation |
 | LLM | Groq Llama 3.3 70B | Fast inference, free tier, strong reasoning, supports tool calling |
-| Tool Registry | MCP (SSE transport) | Standardized web-search tool interface for 2 of 4 agents; LLM-driven dynamic tool selection in Web Research |
+| Tool Registry | MCP (SSE transport) | 3 tools, 2 providers (Tavily + Wikipedia); LLM-driven dynamic tool selection in Web Research |
 | Web Search | Tavily API | Purpose-built for AI agents, full page extraction |
 | Vector Database | Qdrant | Payload filtering, Docker + cloud identical, direct integration in RAG agent |
 | Embeddings | all-MiniLM-L6-v2 | Local, fast, no API cost, 384-dim cosine similarity |
@@ -248,7 +257,7 @@ research-agent-orchestrator/
 │
 ├── agents/
 │   ├── web_research/
-│   │   ├── agent.py             # MCP tool discovery + LLM-driven tool selection (web_search/news_search) + Groq synthesis
+│   │   ├── agent.py             # MCP tool discovery + LLM-driven tool selection (web_search/news_search/wikipedia_background) + Groq synthesis
 │   │   ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails
 │   │   └── init.py
 │   ├── rag_knowledge/
@@ -265,7 +274,7 @@ research-agent-orchestrator/
 │       └── init.py
 │
 ├── mcp_servers/
-│   ├── web_search_mcp.py        # MCP server (SSE): web_search + news_search tools, backed by Tavily
+│   ├── web_search_mcp.py        # MCP server (SSE): web_search + news_search (Tavily), wikipedia_background (Wikipedia)
 │   └── mcp_client.py            # Shared sync MCP client: tool invocation + dynamic tool discovery for bind_tools
 │
 ├── guardrails/
