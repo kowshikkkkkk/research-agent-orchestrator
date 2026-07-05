@@ -250,28 +250,33 @@ REDIS_URL=redis://redis:6379
 ---
 
 ## Project Structure
+
+```text
 research-agent-orchestrator/
 ├── orchestrator/
 │   ├── orchestrator.py          # LangGraph supervisor, state, conditional retry
-│   └── init.py
+│   └── __init__.py
 │
 ├── agents/
 │   ├── web_research/
 │   │   ├── agent.py             # MCP tool discovery + LLM-driven tool selection (web_search/news_search/wikipedia_background) + Groq synthesis
 │   │   ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails
-│   │   └── init.py
+│   │   └── __init__.py
+│   │
 │   ├── rag_knowledge/
 │   │   ├── agent.py             # Direct Qdrant + embedding integration: chunk, embed, index, retrieve + Groq synthesis
 │   │   ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails; handles both search and document ingest
-│   │   └── init.py
+│   │   └── __init__.py
+│   │
 │   ├── market_data/
 │   │   ├── agent.py             # MCP web_search with a deterministic market-biased query + quantitative extraction
 │   │   ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails
-│   │   └── init.py
+│   │   └── __init__.py
+│   │
 │   └── report_synthesis/
 │       ├── agent.py             # Multi-source report generation with critique-aware retry
 │       ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails
-│       └── init.py
+│       └── __init__.py
 │
 ├── mcp_servers/
 │   ├── web_search_mcp.py        # MCP server (SSE): web_search + news_search (Tavily), wikipedia_background (Wikipedia)
@@ -297,8 +302,7 @@ research-agent-orchestrator/
 ├── docker-compose.yml           # Full platform orchestration (8 services)
 ├── requirements.txt             # Python dependencies
 └── .env.example                 # Environment variable template
-
----
+```
 
 ## How RAG Works in This System
 
