@@ -7,7 +7,7 @@ load_dotenv(Path(__file__).parent.parent / '.env')
 import os
 import httpx
 from typing import TypedDict
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.redis import RedisSaver
 from langchain_groq import ChatGroq
 
@@ -199,10 +199,14 @@ def build_graph():
     graph.add_node("increment_retry", increment_retry)
     graph.add_node("final_output", final_output_node)
 
-    graph.set_entry_point("web_research")
-    graph.add_edge("web_research", "rag_knowledge")
-    graph.add_edge("rag_knowledge", "market_data")
+    graph.add_edge(START, "web_research")
+    graph.add_edge(START, "rag_knowledge")
+    graph.add_edge(START, "market_data")
+
+    graph.add_edge("web_research", "report_synthesis")
+    graph.add_edge("rag_knowledge", "report_synthesis")
     graph.add_edge("market_data", "report_synthesis")
+
     graph.add_edge("report_synthesis", "critic")
 
     graph.add_conditional_edges(
