@@ -7,7 +7,9 @@
 
 import os
 import sys
+import re
 import json
+import requests
 from dotenv import load_dotenv
 from pathlib import Path
 from mcp.server import Server
@@ -25,6 +27,65 @@ app = Server("web-search-mcp-server")
 tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 MCP_WEB_SEARCH_PORT = int(os.getenv("MCP_WEB_SEARCH_PORT", "8010"))
+
+# Wikipedia's API is free, requires no key, and has no meaningful rate
+# limit for this scale of use -- but it does require a descriptive
+# User-Agent per Wikimedia's API etiquette, or requests can get throttled.
+WIKIPEDIA_SEARCH_URL = "https://en.wikipedia.org/w/api.php"
+WIKIPEDIA_SUMMARY_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/{title}"
+WIKIPEDIA_HEADERS = {
+    "User-Agent": "research-agent-orchestrator/1.0 (https://github.com/kowshikkkkkk/research-agent-orchestrator)"
+}
+
+
+def _wikipedia_search(query: str, max_results: int) -> dict:
+    """
+    Genuinely different provider from Tavily -- encyclopedic background
+    content rather than live web crawl. Two-step lookup: search for
+    matching page titles, then fetch a clean plain-text summary for each
+    (the raw search snippet has HTML highlighting tags in it, so the
+    summary endpoint gives cleaner content for the LLM to read).
+    """
+    search_resp = requests.get(
+        WIKIPEDIA_SEARCH_URL,
+        params={"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": max_results},
+        headers=WIKIPEDIA_HEADERS,
+        timeout=10
+    )
+    search_resp.raise_for_status()
+    hits = search_resp.json().get("query", {}).get("search", [])
+
+    formatted = []
+    sources = []
+    for i, hit in enumerate(hits, 1):
+        title = hit.get("title", "")
+        try:
+            summary_resp = requests.get(
+                WIKIPEDIA_SUMMARY_URL.format(title=requests.utils.quote(title)),
+                headers=WIKIPEDIA_HEADERS,
+                timeout=10
+            )
+            summary_resp.raise_for_status()
+            summary_data = summary_resp.json()
+            extract = summary_data.get("extract", "")
+            url = summary_data.get("content_urls", {}).get("desktop", {}).get(
+                "page", f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+            )
+        except requests.RequestException:
+            # Disambiguation pages and some redirects 404 on the summary
+            # endpoint -- fall back to the raw search snippet with its
+            # HTML highlighting tags stripped out.
+            extract = re.sub("<[^<]+?>", "", hit.get("snippet", ""))
+            url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+
+        formatted.append(f"Result {i}:\nTitle: {title}\nURL: {url}\nContent: {extract}\n")
+        sources.append(url)
+
+    return {
+        "results": "\n---\n".join(formatted),
+        "sources": sources,
+        "result_count": len(hits)
+    }
 
 
 @app.list_tools()
@@ -68,6 +129,30 @@ async def list_tools() -> list[types.Tool]:
                         "type": "integer",
                         "description": "Maximum number of results to return (default: 5)",
                         "default": 5
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        types.Tool(
+            name="wikipedia_background",
+            description=(
+                "Look up encyclopedic background information on a topic -- how something "
+                "works, definitions, history, established facts. Backed by Wikipedia, not "
+                "live web search: use this for evergreen/background questions, not for "
+                "current events, prices, or anything time-sensitive."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The topic or question to look up background on"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of Wikipedia articles to return (default: 3)",
+                        "default": 3
                     }
                 },
                 "required": ["query"]
@@ -149,6 +234,22 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             })
         )]
 
+    elif name == "wikipedia_background":
+        query = arguments.get("query", "")
+        max_results = arguments.get("max_results", 3)
+
+        print(f"[Web MCP] wikipedia_background called for: {query}", file=sys.stderr)
+
+        try:
+            data = _wikipedia_search(query, max_results)
+        except requests.RequestException as e:
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"error": f"Wikipedia lookup failed: {str(e)}"})
+            )]
+
+        return [types.TextContent(type="text", text=json.dumps(data))]
+
     else:
         return [types.TextContent(
             type="text",
@@ -181,5 +282,5 @@ starlette_app = Starlette(routes=[
 
 if __name__ == "__main__":
     print(f"[Web MCP] Starting SSE server on port {MCP_WEB_SEARCH_PORT}", file=sys.stderr)
-    print("[Web MCP] Tools registered: web_search, news_search", file=sys.stderr)
+    print("[Web MCP] Tools registered: web_search, news_search, wikipedia_background", file=sys.stderr)
     uvicorn.run(starlette_app, host="0.0.0.0", port=MCP_WEB_SEARCH_PORT)

@@ -21,18 +21,23 @@ MCP_WEB_SEARCH_URL = os.getenv("MCP_WEB_SEARCH_URL", "http://localhost:8010")
 # This agent discovers tools from the MCP server at call time (not
 # hardcoded) and lets the LLM itself decide which one to use — this is
 # what makes tool selection genuinely dynamic rather than deterministic.
-# The server currently exposes two: 'web_search' for general topics and
-# 'news_search' for recent-news-shaped queries. If a third tool is added
-# to the server later, this agent picks it up automatically — no code
-# change needed here.
+# The server currently exposes three tools, backed by two different
+# providers: 'web_search' and 'news_search' (both Tavily, live web),
+# and 'wikipedia_background' (Wikipedia — genuinely different provider,
+# for evergreen/background questions rather than live or recent content).
+# If a fourth tool is added to the server later, this agent picks it up
+# automatically — no code change needed here.
 
 TOOL_SELECTION_GUIDANCE = (
     "You are a web research specialist with access to search tools. "
-    "Use 'web_search' for general topic research, background information, "
-    "or evergreen facts. Use 'news_search' when the query is specifically "
-    "about recent events, breaking news, or 'what happened' questions. "
-    "Call exactly one tool with an appropriate search query derived from "
-    "the research request below."
+    "Use 'web_search' for general topic research or current information "
+    "that needs a live web crawl. Use 'news_search' when the query is "
+    "specifically about recent events, breaking news, or 'what happened' "
+    "questions. Use 'wikipedia_background' for evergreen, encyclopedic, "
+    "or definitional questions — how something works, established facts, "
+    "history — where a live crawl isn't needed. Call exactly one tool "
+    "with an appropriate search query derived from the research request "
+    "below."
 )
 
 SYNTHESIS_INSTRUCTION = (
