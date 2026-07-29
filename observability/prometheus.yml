@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'web_research_agent'
+    static_configs:
+      - targets: ['web_research:8001']
+
+  - job_name: 'rag_knowledge_agent'
+    static_configs:
+      - targets: ['rag_knowledge:8002']
+
+  - job_name: 'market_data_agent'
+    static_configs:
+      - targets: ['market_data:8003']
+
+  - job_name: 'report_synthesis_agent'
+    static_configs:
+      - targets: ['report_synthesis:8004']
