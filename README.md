@@ -1,14 +1,149 @@
-## Research-Agent-Orchestrator
+# Research Agent Orchestrator
 
-A multi-agent AI system that answers complex business research queries by orchestrating specialized agents, each running as an independent microservice communicating via Google's A2A protocol.
+A multi-agent AI system that answers complex business research queries by orchestrating specialized agents — each running as an independent microservice, communicating via Google's A2A protocol, and coordinated end-to-end through a LangGraph state machine.
 
 **Ask it:** *"What is the competitive landscape for fintech lending in Southeast Asia?"*
-
 **It returns:** A structured, cited, quality-evaluated business intelligence report — combining live web data, curated knowledge base retrieval, and quantitative market statistics.
 
 ---
 
-## Architecture
+## 🚀 Features
+
+- 🤖 **Specialized Agents** — dedicated microservices for web research, knowledge-base retrieval, quantitative market data, and report synthesis, each independently deployable and scalable
+- 🎯 **LLM-Driven Tool Selection** — the Web Research agent discovers available MCP tools at runtime and lets the model choose between `web_search`, `news_search`, and `wikipedia_background` per query, instead of hardcoded branching
+- 📚 **Direct RAG Integration** — the Knowledge agent owns its own embedding model (`all-MiniLM-L6-v2`) and Qdrant client, chunking, embedding, and retrieving without an extra network hop
+- 🔁 **Critique-Aware Retry Loop** — a Critic node scores every report on specificity, named entities, structure, and vague language; scores below 0.7 route back to Report Synthesis with the critique carried forward in state, capped at 2 retries
+- 🛡️ **Guardrails at Every Boundary** — all A2A task inputs pass through prompt-injection and credential-leak detection before reaching an agent
+- 🔭 **Full Observability** — OpenTelemetry tracing (Jaeger), Prometheus metrics, and structured JSON logs, all tagged with a shared trace_id across every service
+- 🧠 **Distributed Session Memory** — LangGraph's `RedisSaver` checkpoints full graph state after every node, so a crashed process resumes where it left off
+- 🌐 **One-Command Deployment** — Docker Compose brings up all 10 services (4 agents, MCP server, Redis, Qdrant, Jaeger, Prometheus, Grafana, UI) in dependency order, health-checked
+
+---
+
+## 📋 Requirements
+
+- Python 3.11+
+- Docker Desktop
+- Groq API key ([free tier](https://console.groq.com))
+- Tavily API key ([free tier](https://app.tavily.com))
+- LangSmith API key (optional — [smith.langchain.com](https://smith.langchain.com))
+
+---
+
+## 🛠️ Installation
+
+### Option A — Docker Compose (recommended)
+
+```bash
+git clone https://github.com/kowshikkkkkk/research-agent-orchestrator
+cd research-agent-orchestrator
+
+cp .env.example .env
+# add GROQ_API_KEY and TAVILY_API_KEY to .env
+
+docker compose up
+```
+
+Open `http://localhost:8501`.
+
+### Option B — Local development (no Docker)
+
+```bash
+python -m venv .venv
+source .venv/Scripts/activate   # Windows Git Bash
+# source .venv/bin/activate     # Linux/Mac
+
+pip install -r requirements.txt
+
+# infrastructure
+docker run -d -p 6333:6333 qdrant/qdrant
+docker run -d -p 6379:6379 redis:latest
+
+# one terminal each, left running
+python -m mcp_servers.web_search_mcp          # port 8010
+python -m agents.web_research.a2a_server      # port 8001
+python -m agents.rag_knowledge.a2a_server     # port 8002
+python -m agents.market_data.a2a_server       # port 8003
+python -m agents.report_synthesis.a2a_server  # port 8004
+python -m streamlit run ui/app.py             # port 8501
+```
+
+---
+
+## 📝 Configuration
+
+Create `.env` in the project root (see `.env.example`):
+
+```bash
+# Required
+GROQ_API_KEY=your_groq_key
+TAVILY_API_KEY=your_tavily_key
+
+# Observability (optional)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_key
+LANGCHAIN_PROJECT=enterprise-research-agent
+
+# MCP — used by Web Research + Market Data agents
+MCP_WEB_SEARCH_URL=http://localhost:8010      # http://mcp_web_search:8010 in Docker
+MCP_WEB_SEARCH_PORT=8010
+
+# Vector database — used directly by the RAG Knowledge agent
+QDRANT_HOST=localhost                          # qdrant in Docker
+QDRANT_PORT=6333
+```
+
+Docker Compose overrides the service URLs automatically (`WEB_RESEARCH_URL`, `RAG_KNOWLEDGE_URL`, `MARKET_DATA_URL`, `REPORT_SYNTHESIS_URL`, `REDIS_URL`) to use container service names instead of `localhost`.
+
+---
+
+## 📁 Project Structure
+
+```text
+research-agent-orchestrator/
+│
+├── orchestrator/
+│   └── orchestrator.py          # LangGraph supervisor: state, nodes, conditional retry edge
+│
+├── agents/
+│   ├── web_research/            # MCP tool discovery + LLM-driven tool selection + Groq synthesis
+│   ├── rag_knowledge/           # Direct Qdrant + embedding integration; handles search & ingest
+│   ├── market_data/             # MCP web_search with a deterministic market-biased query
+│   └── report_synthesis/        # Multi-source report generation with critique-aware retry
+│       # each agent/ has agent.py (logic) + a2a_server.py (FastAPI + A2A + Guardrails)
+│
+├── mcp_servers/
+│   ├── web_search_mcp.py        # MCP server (SSE): web_search + news_search (Tavily), wikipedia_background
+│   └── mcp_client.py            # Shared sync MCP client: tool invocation + discovery for bind_tools
+│
+├── guardrails/
+│   └── guardrails.py            # Prompt injection detection, credential sanitization
+│
+├── observability/
+│   ├── logging_config.py        # Structured JSON logging, trace_id propagation
+│   ├── tracing.py               # OpenTelemetry setup, W3C trace-context propagation
+│   ├── a2a_instrumentation.py   # Wraps tracing + metrics + logging around one A2A task handler
+│   └── metrics.py               # Prometheus counters/histograms
+│
+├── evals/
+│   ├── golden_queries.json      # 8 hand-authored queries spanning research domains
+│   ├── metrics.py                # Deterministic checks: structure, keyword coverage, density
+│   ├── judge.py                  # Independent LLM judge: groundedness, coverage, genericness
+│   └── run_eval.py               # Harness: runs the real orchestrator graph against the golden set
+│
+├── ui/
+│   └── app.py                    # Streamlit UI: research, PDF ingestion, health monitoring
+│
+├── docs/screenshots/              # README screenshots
+├── Dockerfile                     # Single shared image for all services
+├── docker-compose.yml              # Full platform orchestration (10 services)
+├── requirements.txt
+└── .env.example
+```
+
+---
+
+## 🏗️ System Architecture
 
 ```mermaid
 flowchart TD
@@ -26,7 +161,6 @@ flowchart TD
     D -->|"Update State"| B
 
     B -->|"A2A Task"| E["Market Data Agent<br/>Port 8003"]
-    
     E -->|"Update State"| B
 
     C -.->|"synthesis"| L["Groq Llama 3.3 70B"]
@@ -43,17 +177,7 @@ flowchart TD
     I --> F
 ```
 
-**Tool access is not symmetric between the two MCP consumers.** Web Research can call any of three tools — `web_search`, `news_search` (both Tavily), or `wikipedia_background` (Wikipedia, a genuinely different provider) — the LLM picks one per query based on what the question actually needs. Market Data can only ever call `web_search`, always with the same biased-query pattern — it has access to a tool, just not a choice between tools.
-
-**Infrastructure**
-- **Redis** — LangGraph session checkpointing across queries
-- **Qdrant** — Vector database for RAG, accessed directly by the RAG Knowledge agent
-- **MCP (SSE transport)** — Standardized tool interface for web search, shared by the Web Research and Market Data agents
-- **LangSmith** — Automatic tracing of all LangGraph nodes and LLM calls
-- **Guardrails AI** — Prompt injection detection at every A2A boundary
-- **Docker Compose** — Single command deployment of the entire platform
-
-*Retry is capped at 2 attempts — if the score is still below 0.7 after that, the best available report ships with its quality score attached rather than looping indefinitely. Retry re-runs only Report Synthesis, not the research agents — if the underlying research data was the actual problem, this is a known limitation, not something the retry loop fixes.*
+Research agents run off `START` in parallel (web_research, rag_knowledge, market_data all feed into report_synthesis), and the Critic's conditional edge is what makes the retry loop graph structure rather than application code. Full architectural reasoning for every major decision is below, followed by how RAG, the retry loop, and Guardrails actually work under the hood.
 
 ---
 
@@ -135,175 +259,6 @@ Without it, running this system requires 6+ terminals: Qdrant, Redis, the MCP we
 
 ---
 
-## Tech Stack
-
-| Layer | Technology | Why |
-|---|---|---|
-| Orchestration | LangGraph | Conditional routing, Redis checkpointing, LangSmith integration |
-| Agent Communication | A2A Protocol | Standardized agent discovery and task delegation |
-| LLM | Groq Llama 3.3 70B | Fast inference, free tier, strong reasoning, supports tool calling |
-| Tool Registry | MCP (SSE transport) | 3 tools, 2 providers (Tavily + Wikipedia); LLM-driven dynamic tool selection in Web Research |
-| Web Search | Tavily API | Purpose-built for AI agents, full page extraction |
-| Vector Database | Qdrant | Payload filtering, Docker + cloud identical, direct integration in RAG agent |
-| Embeddings | all-MiniLM-L6-v2 | Local, fast, no API cost, 384-dim cosine similarity |
-| Agent Framework | FastAPI | Independent microservices, A2A endpoints |
-| Security | Guardrails AI | Prompt injection detection at A2A boundaries |
-| Observability | LangSmith | Zero-code automatic tracing of LangGraph pipelines |
-| Session Memory | Redis + RedisSaver | Distributed state persistence across agent processes |
-| Evaluation | Custom harness (deterministic + LLM judge) | Regression testing against a fixed golden set — not a production benchmark |
-| UI | Streamlit | PDF ingestion, agent health monitoring, live research |
-| Deployment | Docker Compose | Single command startup, health-check ordered dependencies |
-
----
-
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Docker Desktop
-- Groq API key (free at console.groq.com)
-- Tavily API key (free at app.tavily.com)
-- LangSmith API key (optional, free at smith.langchain.com)
-
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/kowshikkkkkk/research-agent-orchestrator
-cd research-agent-orchestrator
-
-# Create environment file
-cp .env.example .env
-# Add your API keys to .env
-
-# Start the entire platform
-docker compose up
-```
-
-Open `http://localhost:8501` in your browser.
-
-### Local Development (without Docker)
-
-```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/Scripts/activate  # Windows Git Bash
-# source .venv/bin/activate    # Linux/Mac
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start infrastructure
-docker run -d -p 6333:6333 qdrant/qdrant
-docker run -d -p 6379:6379 redis:latest
-
-# Start the MCP web search server
-python -m mcp_servers.web_search_mcp          # Terminal 1 - port 8010
-
-# Start all agents
-python -m agents.web_research.a2a_server      # Terminal 2 - port 8001
-python -m agents.rag_knowledge.a2a_server     # Terminal 3 - port 8002
-python -m agents.market_data.a2a_server       # Terminal 4 - port 8003
-python -m agents.report_synthesis.a2a_server  # Terminal 5 - port 8004
-
-# Start UI
-python -m streamlit run ui/app.py             # Terminal 6
-```
-
-### Running the eval harness
-
-```bash
-# Requires the full stack to be running (docker compose up)
-python -m evals.run_eval                    # full 8-query golden set
-python -m evals.run_eval --limit 1          # quick smoke test
-```
-See `evals/README.md` for scope, pass criteria, and honest limitations.
-
-### Environment Variables
-
-```bash
-# Required
-GROQ_API_KEY=your_groq_key
-TAVILY_API_KEY=your_tavily_key
-
-# Observability
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=your_langsmith_key
-LANGCHAIN_PROJECT=enterprise-research-agent
-
-# MCP — used by Web Research + Market Data agents
-MCP_WEB_SEARCH_URL=http://localhost:8010      # http://mcp_web_search:8010 in Docker
-MCP_WEB_SEARCH_PORT=8010
-
-# Vector database — used directly by the RAG Knowledge agent
-QDRANT_HOST=localhost                          # qdrant in Docker
-QDRANT_PORT=6333
-
-# Docker (auto-set by docker-compose.yml)
-WEB_RESEARCH_URL=http://web_research:8001
-RAG_KNOWLEDGE_URL=http://rag_knowledge:8002
-MARKET_DATA_URL=http://market_data:8003
-REPORT_SYNTHESIS_URL=http://report_synthesis:8004
-REDIS_URL=redis://redis:6379
-```
-
----
-
-## Project Structure
-
-```text
-research-agent-orchestrator/
-├── orchestrator/
-│   ├── orchestrator.py          # LangGraph supervisor, state, conditional retry
-│   └── __init__.py
-│
-├── agents/
-│   ├── web_research/
-│   │   ├── agent.py             # MCP tool discovery + LLM-driven tool selection (web_search/news_search/wikipedia_background) + Groq synthesis
-│   │   ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails
-│   │   └── __init__.py
-│   │
-│   ├── rag_knowledge/
-│   │   ├── agent.py             # Direct Qdrant + embedding integration: chunk, embed, index, retrieve + Groq synthesis
-│   │   ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails; handles both search and document ingest
-│   │   └── __init__.py
-│   │
-│   ├── market_data/
-│   │   ├── agent.py             # MCP web_search with a deterministic market-biased query + quantitative extraction
-│   │   ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails
-│   │   └── __init__.py
-│   │
-│   └── report_synthesis/
-│       ├── agent.py             # Multi-source report generation with critique-aware retry
-│       ├── a2a_server.py        # FastAPI + A2A protocol + Guardrails
-│       └── __init__.py
-│
-├── mcp_servers/
-│   ├── web_search_mcp.py        # MCP server (SSE): web_search + news_search (Tavily), wikipedia_background (Wikipedia)
-│   └── mcp_client.py            # Shared sync MCP client: tool invocation + dynamic tool discovery for bind_tools
-│
-├── guardrails/
-│   └── guardrails.py            # Prompt injection detection, credential sanitization
-│
-├── evals/
-│   ├── golden_queries.json      # 8 hand-authored queries spanning research domains
-│   ├── metrics.py               # Deterministic checks: structure, keyword coverage, vague language, density
-│   ├── judge.py                 # Independent LLM judge: groundedness, coverage, genericness
-│   ├── run_eval.py              # Harness: runs the real orchestrator graph against the golden set
-│   └── README.md                # Scope and honest limitations of the eval harness
-│
-├── ui/
-│   └── app.py                   # Streamlit UI: research, PDF ingestion, health monitoring
-│
-├── memory/                      # Redis configuration reference
-├── knowledge_base/              # Document storage for ingestion
-│
-├── Dockerfile                   # Single shared image for all services
-├── docker-compose.yml           # Full platform orchestration (8 services)
-├── requirements.txt             # Python dependencies
-└── .env.example                 # Environment variable template
-```
-
 ## How RAG Works in This System
 
 ```mermaid
@@ -375,45 +330,131 @@ flowchart LR
 
 ---
 
-## Sample Output
+## 📸 Screenshots
 
-**Query:** "What is the competitive landscape for fintech lending in Southeast Asia?"
+**1. Landing page** — system status panel confirms all four agents are healthy before a query is even submitted.
 
-**Quality Score:** 0.9 | **Retries:** 0 | **Sources:** Web Research + Knowledge Base + Market Data
-Executive Summary
-The SEA fintech lending market is projected to reach $325 billion by 2030,
-growing at 23% CAGR, driven by a 70% underbanked population across the region.
-Key players include Funding Societies, Akulaku, Grab Financial Group, and GoPay...
-Key Findings
+![Landing page](docs/screenshots/01-landing-page.png)
 
-Funding Societies acquired CardUp in 2024, creating integrated B2B payment
-and lending capabilities (Knowledge Base)
-SEA alternative lending market grew 45% CAGR from $26B in 2021 to $116B
-by 2025 (Market Data)
-Philippines accounted for 59% of alternative lending deal volume in 2024 (Web Research)
-Digital lending to surpass payments as primary revenue driver by 2025 (Web Research)
-...
+**2. Agent pipeline mid-run** — every LangGraph stage (Web Research → RAG Knowledge → Market Data → Synthesis → Critic) reporting back live, ending with the Critic's own quality score.
 
+![Agent pipeline](docs/screenshots/03-agent-pipeline.png)
+
+**3. Generated report** — structured, cited output with inline per-claim source attribution (Web Research / Knowledge Base / Market Data).
+
+![Research report](docs/screenshots/02-research-report.png)
+
+---
+
+## 🧩 Key Components
+
+**1. Orchestrator**
+Location: `orchestrator/orchestrator.py`
+Purpose: LangGraph supervisor — defines `ResearchState`, the node graph, and the Critic's conditional retry edge.
+Key nodes: `web_research_node`, `rag_knowledge_node`, `market_data_node`, `report_synthesis_node`, `critic_node`, `increment_retry`, `final_output_node`.
+
+**2. Web Research Agent**
+Location: `agents/web_research/agent.py`
+Purpose: Discovers MCP tools at request time via `list_tools()`, binds them to the LLM, and lets the model pick `web_search`, `news_search`, or `wikipedia_background` per query — genuine agentic tool use, not hardcoded routing.
+
+**3. RAG Knowledge Agent**
+Location: `agents/rag_knowledge/agent.py`
+Purpose: Chunks (500 chars, 50 overlap), embeds with `all-MiniLM-L6-v2`, indexes into Qdrant, and retrieves via cosine similarity — no MCP indirection, since it's the sole consumer of its own vector store.
+
+**4. Market Data Agent**
+Location: `agents/market_data/agent.py`
+Purpose: Always calls MCP's `web_search` with a deterministic market-biased query template, then extracts quantitative figures via LLM.
+
+**5. Report Synthesis Agent**
+Location: `agents/report_synthesis/agent.py`
+Purpose: Drafts the structured report from all three research streams; on retry, reads the Critic's critique from state and specifically addresses the gaps it named.
+
+**6. Guardrails**
+Location: `guardrails/guardrails.py`
+Purpose: `guard_a2a_task()` runs at every A2A boundary — prompt-injection pattern matching (12 patterns), credential-leak detection, oversized-payload rejection.
+
+**7. Observability**
+Location: `observability/`
+Purpose: `a2a_instrumentation.py` wraps every task handler in one context manager that opens an OTel span, binds the trace_id into structured logs, and records Prometheus request metrics on exit.
+
+---
+
+## 🔧 API Endpoints
+
+Every agent (`web_research` :8001, `rag_knowledge` :8002, `market_data` :8003, `report_synthesis` :8004) exposes the same A2A surface:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/.well-known/agent.json` | GET | AgentCard — capabilities, input/output schema |
+| `/health` | GET | Liveness check |
+| `/metrics` | GET | Prometheus-format metrics |
+| `/tasks/send` | POST | A2A task submission — the only way to actually invoke the agent |
+
+The RAG Knowledge agent overloads `/tasks/send`: passing an `ingest` object in the task input triggers document ingestion instead of a search.
+
+The MCP web search server (`:8010`, SSE transport) exposes `list_tools()` and `call_tool()` for `web_search`, `news_search`, and `wikipedia_background`, consumed by the Web Research and Market Data agents.
+
+---
+
+## 📖 Documentation
+
+- [`evals/README.md`](evals/README.md) — scope and honest limitations of the eval harness
+- `.env.example` — full environment variable reference
+
+---
+
+## 🎯 Use Cases
+
+- **Competitive landscape research** — market sizing, key players, growth trends for a sector or region
+- **Due diligence support** — combine live web data with an internal knowledge base for grounded, cited answers
+- **Market data extraction** — quantitative stats (CAGR, market size, funding volume) pulled and structured automatically
+- **Regression-tested prompt iteration** — run `evals/run_eval.py` before and after a prompt change to check whether it actually helped
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| Orchestration | LangGraph | Conditional routing, Redis checkpointing, LangSmith integration |
+| Agent Communication | A2A Protocol | Standardized agent discovery and task delegation |
+| LLM | Groq Llama 3.3 70B | Fast inference, free tier, strong reasoning, tool calling |
+| Tool Registry | MCP (SSE transport) | 3 tools, 2 providers; LLM-driven dynamic tool selection in Web Research |
+| Web Search | Tavily API | Purpose-built for AI agents, full page extraction |
+| Vector Database | Qdrant | Payload filtering, Docker + cloud identical, direct integration |
+| Embeddings | all-MiniLM-L6-v2 | Local, fast, no API cost, 384-dim cosine similarity |
+| Agent Framework | FastAPI | Independent microservices, A2A endpoints |
+| Security | Guardrails AI | Prompt injection detection at A2A boundaries |
+| Observability | OpenTelemetry + Jaeger + Prometheus + Grafana | Distributed tracing, metrics, dashboards |
+| Session Memory | Redis + RedisSaver | Distributed state persistence across agent processes |
+| Evaluation | Custom harness | Deterministic checks + independent LLM judge |
+| UI | Streamlit | PDF ingestion, agent health monitoring, live research |
+| Deployment | Docker Compose | Single command startup, health-check ordered dependencies |
 
 ---
 
 ## Known Limitations
 
-Being upfront about these rather than glossing over them:
-
-- **Research agents run sequentially, not in parallel.** Web Research, RAG Knowledge, and Market Data don't depend on each other's output, so they're a natural candidate for `asyncio.gather`-style parallel execution — currently they run one after another.
-- **Retry only re-synthesizes, never re-researches.** If a low Critic score is caused by weak underlying research data rather than weak writing, the retry loop can't fix it.
-- **No auth, rate limiting, or circuit breakers** on any agent or MCP endpoint.
-- **Single-node Redis and Qdrant** — no replication or failover.
-- **One MCP connection per call, no pooling** — fine for demo load, not for production request volume.
-- **The eval harness's golden set is 8 hand-written queries** — a regression tripwire against known checkpoints, not a statistically validated benchmark of research quality.
+- Research agents run sequentially in the graph edges from `START`, not with `asyncio.gather` — a natural next optimization since they don't depend on each other's output
+- Retry only re-runs Report Synthesis, never the research agents — a low score caused by thin underlying research can't be fixed by retry alone
+- No auth, rate limiting, or circuit breakers on any agent or MCP endpoint
+- Single-node Redis and Qdrant — no replication or failover
+- The eval harness's golden set is 8 hand-written queries — a regression tripwire, not a statistically validated benchmark
 
 ---
 
-## Author
+## 👤 Author
 
 **Kowshik Sai**
 PGDM — Research and Business Analytics, Madras School of Economics
 
 - GitHub: [github.com/kowshikkkkkk](https://github.com/kowshikkkkkk)
 - LinkedIn: [linkedin.com/in/Kowshik-sai](https://linkedin.com/in/Kowshik-sai)
+
+## 🙏 Acknowledgments
+
+Built with LangGraph · LangChain · FastAPI · Qdrant · Tavily · Groq · Guardrails AI · OpenTelemetry
+
+## 🔗 Repository
+
+[github.com/kowshikkkkkk/research-agent-orchestrator](https://github.com/kowshikkkkkk/research-agent-orchestrator)
