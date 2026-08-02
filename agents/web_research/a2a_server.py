@@ -1,15 +1,41 @@
 # agents/web_research/a2a_server.py
 
-from fastapi import FastAPI
+# agents/web_research/a2a_server.py
+
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Any
 import uuid
 import time
 from agents.web_research.agent import run_web_research
 from guardrails.guardrails import guard_a2a_task
+from observability.a2a_instrumentation import A2AInstrumentation
+from observability.metrics import metrics_response
 
 app = FastAPI(title="Web Research Agent")
+instrumentation = A2AInstrumentation("web_research")
 
+
+@app.exception_handler(Exception)
+async def handle_uncaught_exception(request: Request, exc: Exception):
+    task_id = "unknown"
+    try:
+        body = await request.json()
+        task_id = body.get("task_id", "unknown")
+    except Exception:
+        pass
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "task_id": task_id,
+            "status": "failed",
+            "output": {"error": str(exc)},
+            "agent_name": "web_research",
+            "execution_time_ms": 0,
+        },
+    )
 AGENT_CARD = {
     "name": "Web Research Agent",
     "version": "1.0.0",
@@ -54,29 +80,37 @@ def get_agent_card():
 def health_check():
     return {"status": "healthy", "agent": "web_research"}
 
+@app.get("/metrics")
+def metrics():
+    body, content_type = metrics_response()
+    return Response(content=body, media_type=content_type)
+
 @app.post("/tasks/send", response_model=A2ATaskResult)
-def handle_task(task: A2ATask) -> A2ATaskResult:
+def handle_task(task: A2ATask, request: Request) -> A2ATaskResult:
     task_id = task.task_id or str(uuid.uuid4())
     start_time = time.time()
 
-    guard_result = guard_a2a_task(task.input, source="web_research_agent")
-    if not guard_result["safe"]:
-        return A2ATaskResult(
-            task_id=task_id,
-            status="blocked",
-            output={
-                "error": "Content blocked by guardrails",
-                "violations": guard_result["violations"]
-            },
-            agent_name="web_research",
-            execution_time_ms=round((time.time() - start_time) * 1000, 2)
-        )
+    with instrumentation.task_span(task_id, dict(request.headers)) as span_ctx:
+        guard_result = guard_a2a_task(task.input, source="web_research_agent")
+        if not guard_result["safe"]:
+            instrumentation.log_guardrail_violation("blocked", guard_result["violations"])
+            span_ctx.record_outcome("blocked")
+            return A2ATaskResult(
+                task_id=task_id,
+                status="blocked",
+                output={
+                    "error": "Content blocked by guardrails",
+                    "violations": guard_result["violations"]
+                },
+                agent_name="web_research",
+                execution_time_ms=round((time.time() - start_time) * 1000, 2)
+            )
 
-    sanitized_input = guard_result["sanitized_input"]
+        sanitized_input = guard_result["sanitized_input"]
 
-    try:
         query = sanitized_input.get("query", "")
         if not query:
+            span_ctx.record_outcome("failed")
             return A2ATaskResult(
                 task_id=task_id,
                 status="failed",
@@ -86,20 +120,12 @@ def handle_task(task: A2ATask) -> A2ATaskResult:
             )
 
         result = run_web_research(query)
+        span_ctx.record_outcome("completed")
 
         return A2ATaskResult(
             task_id=task_id,
             status="completed",
             output=result,
-            agent_name="web_research",
-            execution_time_ms=round((time.time() - start_time) * 1000, 2)
-        )
-
-    except Exception as e:
-        return A2ATaskResult(
-            task_id=task_id,
-            status="failed",
-            output={"error": str(e)},
             agent_name="web_research",
             execution_time_ms=round((time.time() - start_time) * 1000, 2)
         )
