@@ -4,11 +4,12 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from langchain_groq import ChatGroq
+from orchestrator.llm_utils import invoke_llm_with_retry
 
 load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.1
 )
@@ -19,7 +20,8 @@ def run_report_synthesis(
     rag_results: str,
     market_data: str,
     critique: str = "",
-    retry_count: int = 0
+    retry_count: int = 0,
+    past_context: str = ""
 ) -> dict:
     """
     Synthesizes all agent outputs into a structured report.
@@ -39,9 +41,20 @@ Critic feedback:
 
 You must specifically address these issues in this version.
 """
+    past_context_block = ""
+    if past_context:
+        past_context_block = f"""
+RELEVANT PAST RESEARCH (from this user's history):
+{past_context}
+
+If relevant, reference or build on these prior findings — but only where
+they genuinely inform this new query. Do not force a connection if the
+past research is unrelated.
+"""
 
     prompt = f"""You are a senior business intelligence analyst producing a professional research report.
 {critique_context}
+{past_context_block}
 Query: {query}
 
 RESEARCH INPUTS:
@@ -77,9 +90,10 @@ Named competitors with their positioning, strengths, and market focus.
 Requirements:
 - Include specific company names, funding amounts, market sizes
 - Cite which source (web research, knowledge base, or market data) each finding comes from
-- No vague statements like "significant growth" without a number attached"""
+- No vague statements like "significant growth" without a number attached
+- CRITICAL FORMATTING RULE: every section header must use markdown heading syntax exactly as shown above (## Executive Summary, ## Key Findings, etc.) — never bold text (**Executive Summary**) or plain text as a substitute for a heading. This is a strict structural requirement, not a style preference."""
 
-    response = llm.invoke(prompt)
+    response = invoke_llm_with_retry(llm, prompt)
 
     return {
         "query": query,

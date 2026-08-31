@@ -7,11 +7,12 @@ from pathlib import Path
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, ToolMessage
 from mcp_servers.mcp_client import call_mcp_tool_sync, discover_mcp_tools_sync
+from orchestrator.llm_utils import invoke_llm_with_retry
 
 load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.1
 )
@@ -57,7 +58,7 @@ def run_web_research(query: str) -> dict:
     llm_with_tools = llm.bind_tools(available_tools)
 
     messages = [HumanMessage(content=f"{TOOL_SELECTION_GUIDANCE}\n\nResearch request: {query}")]
-    ai_response = llm_with_tools.invoke(messages)
+    ai_response = invoke_llm_with_retry(llm_with_tools, messages)
     messages.append(ai_response)
 
     if not ai_response.tool_calls:
@@ -88,7 +89,7 @@ def run_web_research(query: str) -> dict:
         messages.append(ToolMessage(content=raw, tool_call_id=tool_call["id"]))
 
     messages.append(HumanMessage(content=SYNTHESIS_INSTRUCTION))
-    final_response = llm.invoke(messages)  # plain llm here — no need to re-bind tools for synthesis
+    final_response = invoke_llm_with_retry(llm, messages)  # plain llm here — no need to re-bind tools for synthesis
 
     return {
         "query": query,

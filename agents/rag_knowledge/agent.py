@@ -19,11 +19,12 @@ from pathlib import Path
 from langchain_groq import ChatGroq
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
+from orchestrator.llm_utils import invoke_llm_with_retry
 
 load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.1
 )
@@ -173,7 +174,7 @@ Provide:
 2. Supporting evidence from the retrieved chunks
 3. Any gaps or limitations in the available knowledge"""
 
-    response = llm.invoke(prompt)
+    response = invoke_llm_with_retry(llm, prompt)
     return {
         "query": query,
         "synthesis": response.content,

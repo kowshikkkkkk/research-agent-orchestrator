@@ -9,7 +9,7 @@ from typing import Any
 import uuid
 import time
 from agents.rag_knowledge.agent import run_rag_research, ingest_document
-from guardrails.guardrails import guard_a2a_task
+from content_safety.guardrails import guard_a2a_task
 from observability.a2a_instrumentation import A2AInstrumentation
 from observability.metrics import metrics_response
 

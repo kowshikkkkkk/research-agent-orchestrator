@@ -9,7 +9,7 @@ from typing import Any
 import uuid
 import time
 from agents.report_synthesis.agent import run_report_synthesis
-from guardrails.guardrails import guard_a2a_task
+from content_safety.guardrails import guard_a2a_task
 from observability.a2a_instrumentation import A2AInstrumentation
 from observability.metrics import metrics_response
 
@@ -51,7 +51,8 @@ AGENT_CARD = {
             "rag_results": {"type": "string"},
             "market_data": {"type": "string"},
             "critique": {"type": "string"},
-            "retry_count": {"type": "integer"}
+            "retry_count": {"type": "integer"},
+            "past_context": {"type": "string"}
         },
         "required": ["query", "web_results", "rag_results", "market_data"]
     },
@@ -113,7 +114,8 @@ def handle_task(task: A2ATask, request: Request) -> A2ATaskResult:
             rag_results=sanitized_input.get("rag_results", ""),
             market_data=sanitized_input.get("market_data", ""),
             critique=sanitized_input.get("critique", ""),
-            retry_count=sanitized_input.get("retry_count", 0)
+            retry_count=sanitized_input.get("retry_count", 0),
+            past_context=sanitized_input.get("past_context", "")
         )
         span_ctx.record_outcome("completed")
 

@@ -9,3 +9,8 @@ mlruns/*~
 
 # Eval run outputs (full report text; keep the harness code, not every run)
 evals/results/*.json
+.env
+.venv/
+__pycache__/
+*.pyc
+evals/results/

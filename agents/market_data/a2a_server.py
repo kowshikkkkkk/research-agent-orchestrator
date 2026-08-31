@@ -9,7 +9,7 @@ from typing import Any
 import uuid
 import time
 from agents.market_data.agent import run_market_data_research
-from guardrails.guardrails import guard_a2a_task
+from content_safety.guardrails import guard_a2a_task
 from observability.a2a_instrumentation import A2AInstrumentation
 from observability.metrics import metrics_response
 

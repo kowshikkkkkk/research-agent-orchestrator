@@ -16,7 +16,7 @@ from langchain_groq import ChatGroq
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 judge_llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.0  # deterministic scoring, not creative
 )
