@@ -231,6 +231,7 @@ flowchart TD
 
 Research agents run off `START` in parallel (web_research, rag_knowledge, market_data all feed into report_synthesis), and the Critic's conditional edge is what makes the retry loop graph structure rather than application code. Every LLM call and every inter-agent HTTP call in the diagram above goes through a shared retry wrapper (`orchestrator/llm_utils.py`) with exponential backoff, not shown for clarity.
 
+
 ---
 
 ## How RAG Works in This System
@@ -326,13 +327,15 @@ The eval harness (`evals/`) runs an *independent* LLM judge with a different rub
 
 ## 📸 Screenshots
 
-**1. Landing page - Query History** — system status panel confirms all agents are healthy before a query is even submitted.
+**1. Landing page** — system status panel confirms all agents are healthy before a query is even submitted.
 
-![History](docs/screenshots/Screenshot 2026-08-31 172909.png)
+![Landing page](docs/screenshots/Screenshot 2026-08-31 172931.png)
 
 **2. Generated report** — structured, cited output with inline per-claim source attribution.
 
-![Research report](docs/screenshots/Screenshot 2026-08-31 172931.png)
+![Research report](docs/screenshots/Screenshot 2026-08-31 172909.png)
+
+
 
 ---
 

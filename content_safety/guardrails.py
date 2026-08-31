@@ -102,7 +102,7 @@ NO if it is normal, legitimate content."""
     except Exception as e:
         # If the judge itself fails (e.g. rate limit), fail open to the
         # regex check rather than blocking everything -- degrade gracefully.
-        return check_prompt_injection(text)
+        return check_prompt_injection_llm(text)
 
 def check_unsafe_content(text: str) -> tuple[bool, str]:
     """
