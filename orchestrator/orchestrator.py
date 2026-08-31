@@ -8,6 +8,7 @@ from typing import TypedDict
 from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.redis import RedisSaver
 from langchain_groq import ChatGroq
+from orchestrator.llm_utils import invoke_llm_with_retry, post_with_retry
 
 from observability.logging_config import get_logger, set_trace_id
 from observability.tracing import init_tracing, inject_trace_headers, get_current_trace_id
@@ -22,10 +23,6 @@ logger = get_logger("orchestrator")
 tracer = init_tracing("orchestrator")
 
 # ── AGENT URLs ────────────────────────────────────────────────────────────────
-# Defaults to localhost for local development.
-# In Docker Compose, these are overridden via environment variables
-# to use service names: http://web_research:8001 etc.
-
 WEB_RESEARCH_URL = os.getenv("WEB_RESEARCH_URL", "http://localhost:8001")
 RAG_KNOWLEDGE_URL = os.getenv("RAG_KNOWLEDGE_URL", "http://localhost:8002")
 MARKET_DATA_URL = os.getenv("MARKET_DATA_URL", "http://localhost:8003")
@@ -34,7 +31,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.1
 )
@@ -50,6 +47,7 @@ class ResearchState(TypedDict):
     quality_score: float
     retry_count: int
     final_output: str
+    past_context: str
 
 # ── NODES ─────────────────────────────────────────────────────────────────────
 
@@ -61,7 +59,7 @@ def web_research_node(state: ResearchState) -> ResearchState:
         try:
             task_payload = {"task_id": task_id, "input": {"query": state['query']}, "context": {}}
             headers = inject_trace_headers({})
-            response = httpx.post(
+            response = post_with_retry(
                 f"{WEB_RESEARCH_URL}/tasks/send",
                 json=task_payload,
                 headers=headers,
@@ -95,7 +93,7 @@ def rag_knowledge_node(state: ResearchState) -> ResearchState:
         try:
             task_payload = {"task_id": task_id, "input": {"query": state['query']}, "context": {}}
             headers = inject_trace_headers({})
-            response = httpx.post(
+            response = post_with_retry(
                 f"{RAG_KNOWLEDGE_URL}/tasks/send",
                 json=task_payload,
                 headers=headers,
@@ -129,7 +127,7 @@ def market_data_node(state: ResearchState) -> ResearchState:
         try:
             task_payload = {"task_id": task_id, "input": {"query": state['query']}, "context": {}}
             headers = inject_trace_headers({})
-            response = httpx.post(
+            response = post_with_retry(
                 f"{MARKET_DATA_URL}/tasks/send",
                 json=task_payload,
                 headers=headers,
@@ -170,12 +168,13 @@ def report_synthesis_node(state: ResearchState) -> ResearchState:
                     "rag_results": state['rag_results'],
                     "market_data": state['market_data'],
                     "critique": state.get('critique', ''),
-                    "retry_count": retry_count
+                    "retry_count": retry_count,
+                    "past_context": state.get('past_context', '')
                 },
                 "context": {}
             }
             headers = inject_trace_headers({})
-            response = httpx.post(
+            response = post_with_retry(
                 f"{REPORT_SYNTHESIS_URL}/tasks/send",
                 json=task_payload,
                 headers=headers,
@@ -220,7 +219,7 @@ Respond in this exact format:
 SCORE: [a number between 0.0 and 1.0]
 FEEDBACK: [one paragraph explaining the score and what specifically needs improvement]"""
 
-        response = llm.invoke(prompt)
+        response = invoke_llm_with_retry(llm, prompt)
         record_llm_usage("critic", response)
         content = response.content
 

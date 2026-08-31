@@ -6,11 +6,12 @@ from dotenv import load_dotenv
 from pathlib import Path
 from langchain_groq import ChatGroq
 from mcp_servers.mcp_client import call_mcp_tool_sync
+from orchestrator.llm_utils import invoke_llm_with_retry
 
 load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.1
 )
@@ -65,7 +66,7 @@ Format as clean bullet points with source citations.
 If no quantitative data is found for a category, skip it.
 Do not include vague statements — numbers only."""
 
-    response = llm.invoke(prompt)
+    response = invoke_llm_with_retry(llm, prompt)
 
     return {
         "query": query,

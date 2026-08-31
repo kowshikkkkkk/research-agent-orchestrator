@@ -16,7 +16,9 @@
 #   python -m evals.run_eval
 #   python -m evals.run_eval --limit 3        # quick smoke test on first 3 queries
 #   python -m evals.run_eval --query q1_fintech  # run a single query by id
-
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path(__file__).parent.parent / '.env')
 import argparse
 import json
 import time

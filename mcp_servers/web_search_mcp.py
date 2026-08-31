@@ -21,6 +21,46 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
 import uvicorn
 
+MAX_QUERY_LENGTH = 500
+MAX_RESULTS_CAP = 10
+ALLOWED_SEARCH_DEPTHS = {"basic", "advanced"}
+
+
+def validate_search_args(arguments: dict) -> dict:
+    """Clamps and validates tool arguments before they reach Tavily/Wikipedia.
+    Never trusts LLM-provided values as-is -- the LLM's tool call is
+    effectively user input, since prompt injection can influence it."""
+    query = str(arguments.get("query", "")).strip()[:MAX_QUERY_LENGTH]
+    if not query:
+        raise ValueError("query must not be empty")
+
+    max_results = arguments.get("max_results", 5)
+    try:
+        max_results = int(max_results)
+    except (TypeError, ValueError):
+        max_results = 5
+    max_results = max(1, min(max_results, MAX_RESULTS_CAP))
+
+    search_depth = arguments.get("search_depth", "advanced")
+    if search_depth not in ALLOWED_SEARCH_DEPTHS:
+        search_depth = "advanced"
+
+    return {"query": query, "max_results": max_results, "search_depth": search_depth}
+
+def validate_wikipedia_args(arguments: dict) -> dict:
+    query = str(arguments.get("query", "")).strip()[:MAX_QUERY_LENGTH]
+    if not query:
+        raise ValueError("query must not be empty")
+
+    max_results = arguments.get("max_results", 3)
+    try:
+        max_results = int(max_results)
+    except (TypeError, ValueError):
+        max_results = 3
+    max_results = max(1, min(max_results, 5))  # Wikipedia results are heavier (2 HTTP calls each)
+
+    return {"query": query, "max_results": max_results}
+
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 app = Server("web-search-mcp-server")
@@ -165,9 +205,14 @@ async def list_tools() -> list[types.Tool]:
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     if name == "web_search":
-        query = arguments.get("query", "")
-        max_results = arguments.get("max_results", 5)
-        search_depth = arguments.get("search_depth", "advanced")
+        try:
+            validated = validate_search_args(arguments)
+        except ValueError as e:
+            return [types.TextContent(type="text", text=json.dumps({"error": str(e)}))]
+
+        query = validated["query"]
+        max_results = validated["max_results"]
+        search_depth = validated["search_depth"]
 
         print(f"[Web MCP] web_search called for: {query}", file=sys.stderr)
 
@@ -200,8 +245,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         )]
 
     elif name == "news_search":
-        query = arguments.get("query", "")
-        max_results = arguments.get("max_results", 5)
+        try:
+            validated = validate_search_args(arguments)
+        except ValueError as e:
+            return [types.TextContent(type="text", text=json.dumps({"error": str(e)}))]
+
+        query = validated["query"]
+        max_results = validated["max_results"]
 
         print(f"[Web MCP] news_search called for: {query}", file=sys.stderr)
 
@@ -235,8 +285,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         )]
 
     elif name == "wikipedia_background":
-        query = arguments.get("query", "")
-        max_results = arguments.get("max_results", 3)
+        try:
+            validated = validate_wikipedia_args(arguments)
+        except ValueError as e:
+            return [types.TextContent(type="text", text=json.dumps({"error": str(e)}))]
+
+        query = validated["query"]
+        max_results = validated["max_results"]
 
         print(f"[Web MCP] wikipedia_background called for: {query}", file=sys.stderr)
 
